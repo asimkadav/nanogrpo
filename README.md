@@ -54,11 +54,19 @@ utils/plot_metrics # reward / entropy / |adv| curves
 
 | Pitfall | Where it lives | What we do |
 |---------|----------------|------------|
-| **Token vs sequence KL** – exact KL needs the full distribution for every token. | `grpo.py` line 17 | We use **sequence KL**: `KL ≈ log π_seq − log π₀_seq`. Fast, but only an approximation. Good enough for small models; bump `kl_coef` up if the policy drifts. |
-| **Proxy entropy** – calling `logp.exp()` only sees the sampled token, under-estimating entropy. | `grpo.py` lines 11-14 | Kept for *logging only*. If you want an entropy **bonus** in the loss, compute it from **full logits** (commented snippet included). |
+| **Token vs sequence KL** – exact KL needs the full distribution for every token. | `grpo.py` line 17 | We use **sequence KL**: `KL ≈ log π_seq − log π₀_seq`. Fast, but only an approximation. Good enough for small models; bump `kl_coef` up if the policy drifts. For variable-length completions, normalize by sequence length or apply a mask to prevent long answers from dominating the KL. |
+| **Proxy entropy** – calling `logp.exp()` only sees the sampled token, under-estimating entropy. | `grpo.py` lines 11-14 | Kept for *logging only* and represents a lower bound. The entropy plots thus show conservative estimates. If you want an entropy **bonus** in the loss, compute it from **full logits** (commented snippet included). |
 | **Length bias** – summing log-probs favors long completions. | `kl = … logp_tokens.sum(-1)` | For variable-length tasks, pass a mask or divide by *T*. Shakespeare toy uses fixed length, so it's fine by default. |
 | **Detached reference** – if gradients leak into the frozen π₀ weights, training explodes 🙀 | `logp_ref = … with torch.no_grad()` | We add `.detach()` inside the KL line to be bullet-proof. |
 | **Zero-variance rewards** – early batches can have identical rewards → `std=0`. | `adv = (r-μ)/(σ+ε)` | Tiny `eps=1e-8` avoids NaNs; wrap in `torch.nan_to_num` for extra safety. |
+| **PPO simplifications** – our baseline intentionally omits some standard PPO features. | `ppo.py` | The PPO implementation uses direct reward bootstrapping without GAE/discounting, which slightly handicaps it versus standard implementations. This is fine for toy examples but worth noting for production use. |
+
+## Plot Improvements 🖼️
+
+For better visualization:
+- Add axis labels to the plot PNGs so they remain self-describing when shared out of context
+- For entropy plots, remember they show a lower bound (sampled-token entropy)
+- CSV headers are aligned with plot scripts for easy experimentation
 
 ---
 
@@ -102,4 +110,4 @@ python plot.py --metric entropy logs/grpo.csv logs/ppo.csv
 
 ---
 
-Pull requests & issues welcome — enjoy hacking! 
+Pull requests & issues welcome — enjoy hacking!
