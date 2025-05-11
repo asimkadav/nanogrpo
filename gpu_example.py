@@ -104,13 +104,19 @@ def train_grpo(vocab_size, train_path, val_path, device='cuda', num_steps=100):
         # Generate sequence with the policy
         with torch.set_grad_enabled(True):
             # Forward pass through policy and reference
-            _, policy_loss = policy(x)
-            with torch.no_grad():
-                _, ref_loss = ref(x)
+            # Create target data for CrossEntropy calculation (next token prediction)
+            targets = torch.roll(x, shifts=-1, dims=1)
+            targets[:, -1] = -1  # Mask the last token
             
-            # Simulate logprobs for this example
-            logp_tokens = -policy_loss * torch.ones(batch_size, max_len, device=device, requires_grad=True)
-            logp_ref = -ref_loss * torch.ones(batch_size, device=device).detach()
+            # Forward pass to get logits and loss
+            policy_logits, policy_loss = policy(x, targets=targets)
+            
+            with torch.no_grad():
+                _, ref_loss = ref(x, targets=targets)
+            
+            # Create logprobs for GRPO (using a simple approximation for the example)
+            logp_tokens = torch.ones(batch_size, max_len, device=device, requires_grad=True) * (-policy_loss.item() / max_len)
+            logp_ref = torch.ones(batch_size, device=device).detach() * (-ref_loss.item())
             
             # Simulate rewards (typically from reward model)
             r = torch.rand(batch_size, device=device).detach()
