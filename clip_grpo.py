@@ -266,24 +266,30 @@ def compute_entropy(logits, temperature=1.0):
         temperature: Temperature for softmax (higher values make distribution more uniform)
     
     Returns:
-        Mean entropy across batch
+        Mean entropy across batch, normalized to [0,1] range
     """
     # Apply temperature scaling to make distributions less extreme
+    # Higher temperature makes distribution more uniform
     scaled_logits = logits / max(temperature, 1e-5)
     
     # Compute probabilities with more stable softmax
     probs = F.softmax(scaled_logits, dim=-1)
     
-    # Add epsilon to prevent log(0) issues (slightly larger for better stability)
+    # Add epsilon to prevent log(0) issues
     eps = 1e-6
     
     # Compute entropy: -sum(p * log(p))
-    # Note: For 100 classes, max entropy is ~4.6 (log(100))
     log_probs = torch.log(probs + eps)
     entropy_per_example = -(probs * log_probs).sum(dim=-1)
     
+    # Normalize by log(num_classes) to get values in [0,1] range
+    # Maximum entropy is log(num_classes) when all probs are equal
+    num_classes = logits.size(-1)
+    max_entropy = math.log(num_classes)
+    normalized_entropy = entropy_per_example / max_entropy
+    
     # Replace NaN/Inf with zeros and return mean
-    return torch.nan_to_num(entropy_per_example).mean()
+    return torch.nan_to_num(normalized_entropy).mean()
 
 def train_clip_with_grpo(args):
     """Train CLIP using GRPO for alignment."""
