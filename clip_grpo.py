@@ -269,7 +269,7 @@ def compute_entropy(logits, temperature=1.0):
         Mean entropy across batch
     """
     # Apply temperature scaling to make distributions less extreme
-    scaled_logits = logits / temperature
+    scaled_logits = logits / max(temperature, 1e-5)
     
     # Compute probabilities with more stable softmax
     probs = F.softmax(scaled_logits, dim=-1)
@@ -277,8 +277,10 @@ def compute_entropy(logits, temperature=1.0):
     # Add epsilon to prevent log(0) issues (slightly larger for better stability)
     eps = 1e-6
     
-    # Compute entropy and handle NaN/Inf values
-    entropy_per_example = -(probs * (probs + eps).log()).sum(dim=-1)
+    # Compute entropy: -sum(p * log(p))
+    # Note: For 100 classes, max entropy is ~4.6 (log(100))
+    log_probs = torch.log(probs + eps)
+    entropy_per_example = -(probs * log_probs).sum(dim=-1)
     
     # Replace NaN/Inf with zeros and return mean
     return torch.nan_to_num(entropy_per_example).mean()
@@ -428,9 +430,9 @@ def train_clip_with_grpo(args):
                 # Compute GRPO loss
                 loss, pg_loss, kl, entropy, advantages = grpo_loss(logp_pol, logp_ref, r)
                 
-                # Add entropy bonus to encourage exploration (0.01 is a typical weight)
-                entropy_weight = 0.01
-                loss = loss - entropy_weight * true_entropy
+                # Add entropy bonus to encourage exploration
+                # For CIFAR-100 with 100 classes, max entropy is ~4.6 (log(100))
+                loss = loss - args.entropy_weight * true_entropy
                 
                 # Check for NaN values and handle them
                 if torch.isnan(loss) or torch.isinf(loss):
@@ -591,6 +593,9 @@ def main():
     
     # New template argument
     parser.add_argument('--templates', type=str, nargs='+', help='Templates to use for text features')
+    
+    # Entropy weight argument
+    parser.add_argument('--entropy-weight', type=float, default=0.01, help='Entropy weight for GRPO loss')
     
     args = parser.parse_args()
     
