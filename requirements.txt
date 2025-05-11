@@ -1,0 +1,11 @@
+torch>=2.2.0
+torchvision>=0.17.0
+ftfy
+regex
+tqdm
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+transformers>=4.30.0
+clip @ git+https://github.com/openai/CLIP.git
+pillow>=10.0.0 

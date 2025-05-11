@@ -43,6 +43,8 @@ grpo.py            # <- core loss  (token-level)
 train_grpo.py      # driver: SFT->GRPO
 reward_model.py    # tiny GPT-style scalar RM
 ppo.py, train_ppo  # side-by-side PPO baseline
+clip_grpo.py       # apply GRPO to finetune CLIP models
+gpu_example.py     # GPU-accelerated GRPO training
 utils/metrics.py   # CSV logger
 utils/plot_metrics # reward / entropy / |adv| curves
 
@@ -100,6 +102,66 @@ python plot.py --metric mean_r logs/grpo.csv logs/ppo.csv
 python plot.py --metric kl logs/grpo.csv logs/ppo.csv
 python plot.py --metric entropy logs/grpo.csv logs/ppo.csv
 ```
+
+## GPU Acceleration 🚀
+
+nanoGRPO fully supports GPU acceleration for faster training:
+
+```bash
+# Install requirements with GPU support
+pip install -r requirements.txt
+
+# Run the GPU-accelerated example
+python gpu_example.py --device cuda --steps 200
+
+# Fall back to CPU if needed
+python gpu_example.py --device cpu --steps 100
+```
+
+Key GPU features:
+- Automatic device selection (falls back to CPU if CUDA unavailable)
+- Performance timing with CUDA events
+- Gradient clipping for numerical stability
+- Models are automatically moved to the specified device
+- Larger batch sizes for better GPU utilization
+
+For multi-GPU training, simply instantiate separate models on different devices and gather gradients.
+
+## CLIP Training with GRPO 🖼️📝
+
+You can also use GRPO to finetune CLIP models, improving visual-text alignment:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Train CLIP with GRPO on CIFAR-100
+python clip_grpo.py --model-name "ViT-B/32" --dataset cifar100 --device cuda
+
+# For CPU-only training
+python clip_grpo.py --model-name "ViT-B/32" --dataset cifar100 --device cpu
+
+# More options
+python clip_grpo.py --help
+```
+
+Key features of CLIP-GRPO training:
+- Freezes the text encoder as a reference model
+- Finetunes only the visual encoder using GRPO
+- Uses classification accuracy as the reward signal
+- Applies KL regularization to prevent too much drift from original CLIP
+- Supports both CIFAR-100 and ImageNet datasets
+- Automatic fallback to CPU if CUDA is not available
+
+---
+
+## Dependencies
+
+See `requirements.txt` for full dependencies. Core requirements:
+- PyTorch ≥ 2.2
+- CLIP (OpenAI's implementation)
+- torchvision
+- numpy/pandas/matplotlib for data handling and visualization
 
 ---
 

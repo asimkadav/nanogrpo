@@ -100,11 +100,15 @@ class GPTConfig:
     n_embd: int = 384
     dropout: float = 0.1
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    device: str = 'cpu' # Device to use (cpu or cuda)
 
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        # Set device from config or default to 'cuda' if available
+        self.device = config.device if hasattr(config, 'device') else ('cuda' if torch.cuda.is_available() else 'cpu')
+        
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
@@ -118,6 +122,9 @@ class GPT(nn.Module):
         # init all weights
         self.apply(self._init_weights)
         self.last_hidden_state = None
+        
+        # Move model to the specified device
+        self.to(self.device)
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -200,3 +207,8 @@ class GPT(nn.Module):
             token_logprobs = torch.cat(logprobs, dim=1)
             return completion, token_logprobs
         return completion 
+
+    def to_device(self, device):
+        """Helper method to move model to a specific device"""
+        self.device = device
+        return self.to(device) 
