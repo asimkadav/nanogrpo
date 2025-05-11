@@ -54,12 +54,12 @@ utils/plot_metrics # reward / entropy / |adv| curves
 
 | Pitfall | Where it lives | What we do |
 |---------|----------------|------------|
-| **Token vs sequence KL** – exact KL needs the full distribution for every token. | `grpo.py` line 17 | We use **sequence KL**: `KL ≈ log π_seq − log π₀_seq`. Fast, but only an approximation. Good enough for small models; bump `kl_coef` up if the policy drifts. For variable-length completions, normalize by sequence length or apply a mask to prevent long answers from dominating the KL. |
-| **Proxy entropy** – calling `logp.exp()` only sees the sampled token, under-estimating entropy. | `grpo.py` lines 11-14 | Kept for *logging only* and represents a lower bound. The entropy plots thus show conservative estimates. If you want an entropy **bonus** in the loss, compute it from **full logits** (commented snippet included). |
-| **Length bias** – summing log-probs favors long completions. | `kl = … logp_tokens.sum(-1)` | For variable-length tasks, pass a mask or divide by *T*. Shakespeare toy uses fixed length, so it's fine by default. |
-| **Detached reference** – if gradients leak into the frozen π₀ weights, training explodes 🙀 | `logp_ref = … with torch.no_grad()` | We add `.detach()` inside the KL line to be bullet-proof. |
-| **Zero-variance rewards** – early batches can have identical rewards → `std=0`. | `adv = (r-μ)/(σ+ε)` | Tiny `eps=1e-8` avoids NaNs; wrap in `torch.nan_to_num` for extra safety. |
-| **PPO simplifications** – our baseline intentionally omits some standard PPO features. | `ppo.py` | The PPO implementation uses direct reward bootstrapping without GAE/discounting, which slightly handicaps it versus standard implementations. This is fine for toy examples but worth noting for production use. |
+| **KL term calculation** | `grpo.py` line 17 | We use the cheap "sequence KL": `KL ≈ logp_tokens.sum(-1) – logp_ref` (with logp_ref detached). This is fast but an approximation to the true token-level KL. For variable-length completions, normalize by sequence length or apply a mask so long answers don't dominate the KL. |
+| **Entropy calculation** | `grpo.py` lines 11-14 | The implemented entropy is a proxy based on sampled tokens only (`logp.exp()`). This underestimates true entropy and is kept for *logging only*. The entropy graph shows a lower bound. If you later want an entropy bonus in the loss, compute it from full logits instead. |
+| **Length bias** | `kl = … logp_tokens.sum(-1)` | Summing log-probs favors long completions. For variable-length tasks, pass a mask or divide by sequence length *T*. The Shakespeare toy example uses fixed length, so it's fine by default. |
+| **Detached reference** | `logp_ref = … with torch.no_grad()` | We add `.detach()` inside the KL line to ensure gradients don't leak into the frozen π₀ weights, which would cause training to explode. |
+| **Zero-variance rewards** | `adv = (r-μ)/(σ+ε)` | Early batches can have identical rewards (std=0). We use a tiny `eps=1e-8` to avoid NaNs and wrap in `torch.nan_to_num` for extra safety. |
+| **PPO simplifications** | `ppo.py` | Our PPO baseline intentionally omits some standard features. It bootstraps returns directly from the reward model without GAE/discounting, which slightly handicaps it versus standard implementations. This is intentional for simplicity in toy examples but worth noting for production use. |
 
 ## Plot Improvements 🖼️
 
