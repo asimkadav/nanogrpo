@@ -19,7 +19,7 @@ from utils.metrics import CSVLogger
 
 # Import peft for LoRA support if available
 try:
-    from peft import LoraConfig, get_peft_model
+    from peft import LoraConfig, get_peft_model, TaskType
     LORA_AVAILABLE = True
 except ImportError:
     LORA_AVAILABLE = False
@@ -54,68 +54,43 @@ class CLIPWrapper(nn.Module):
                 # Try to apply LoRA with different target module strategies
                 lora_applied = False
                 
-                # Strategy 1: Get list of attention layer names in the model
-                target_modules = []
-                for name, _ in self.model.visual.named_modules():
-                    if name.endswith('.attn.out_proj') or name.endswith('.attn.in_proj'):
-                        target_modules.append(name.split('.')[-2] + '.' + name.split('.')[-1])
+                # Strategy 1: Use a simpler approach for vision models with common linear layer names
+                try:
+                    print("Trying LoRA for vision encoder with common layer names")
+                    lora_config = LoraConfig(
+                        r=lora_r,
+                        lora_alpha=lora_alpha,
+                        target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                        lora_dropout=lora_dropout,
+                        bias="none",
+                        task_type="FEATURE_EXTRACTION"  # Vision models are feature extractors, not causal LMs
+                    )
+                    self.model.visual = get_peft_model(self.model.visual, lora_config)
+                    lora_applied = True
+                except ValueError as e:
+                    print(f"First LoRA strategy failed: {e}")
                 
-                if target_modules:
-                    print(f"Applying LoRA to modules: {target_modules}")
-                    try:
-                        # For ViT architecture (ViT-B/32, ViT-L/14, etc.)
-                        lora_config = LoraConfig(
-                            r=lora_r,
-                            lora_alpha=lora_alpha,
-                            target_modules=target_modules,
-                            lora_dropout=lora_dropout,
-                            bias="none",
-                            task_type="CAUSAL_LM"  # This is the default for attention models
-                        )
-                        
-                        # Apply LoRA to the model
-                        self.model.visual = get_peft_model(self.model.visual, lora_config)
-                        lora_applied = True
-                    except ValueError as e:
-                        print(f"First LoRA strategy failed: {e}")
-                
-                # Strategy 2: Use out_proj only
+                # Strategy 2: Let PEFT library find the linear layers automatically
                 if not lora_applied:
                     try:
-                        print("Trying LoRA with 'out_proj' only")
+                        print("Trying LoRA with automatic target detection")
+                        # Use automatic detection of linear layers
                         lora_config = LoraConfig(
                             r=lora_r,
                             lora_alpha=lora_alpha,
-                            target_modules=["out_proj"],
+                            # If target_modules is None, all linear layers will be adapted
                             lora_dropout=lora_dropout,
                             bias="none",
-                            task_type="CAUSAL_LM"
+                            task_type="FEATURE_EXTRACTION"
                         )
                         self.model.visual = get_peft_model(self.model.visual, lora_config)
                         lora_applied = True
                     except ValueError as e:
                         print(f"Second LoRA strategy failed: {e}")
                 
-                # Strategy 3: Let PEFT library find the linear layers automatically
+                # Strategy 3: Apply to linear modules directly
                 if not lora_applied:
-                    try:
-                        print("Trying LoRA with automatic target detection")
-                        lora_config = LoraConfig(
-                            r=lora_r,
-                            lora_alpha=lora_alpha,
-                            target_modules=None,  # Auto-detect Linear layers
-                            lora_dropout=lora_dropout,
-                            bias="none",
-                            task_type="CAUSAL_LM"
-                        )
-                        self.model.visual = get_peft_model(self.model.visual, lora_config)
-                        lora_applied = True
-                    except ValueError as e:
-                        print(f"Third LoRA strategy failed: {e}")
-                
-                # If all LoRA strategies fail, fall back to full fine-tuning
-                if not lora_applied:
-                    print("All LoRA strategies failed, falling back to full fine-tuning")
+                    print("LoRA strategies failed, falling back to full fine-tuning")
                     for param in self.model.visual.parameters():
                         param.requires_grad = True
                 else:
