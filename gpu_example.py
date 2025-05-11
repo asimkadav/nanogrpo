@@ -152,6 +152,7 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
     parser.add_argument('--steps', type=int, default=100, help='Number of training steps')
     parser.add_argument('--data-dir', type=str, default='data/shakespeare_char', help='Data directory')
+    parser.add_argument('--skip-plots', action='store_true', help='Skip generating plots')
     args = parser.parse_args()
     
     # Check if CUDA is available and warn if not
@@ -165,15 +166,18 @@ def main():
     # Train with GRPO on specified device
     log_file = train_grpo(vocab_size, train_path, val_path, device=args.device, num_steps=args.steps)
     
-    # Plot results
-    try:
-        from utils.plot_metrics import plot_metrics
-        metrics = ['mean_r', 'kl', 'entropy', 'loss']
-        for metric in metrics:
-            plot_metrics(log_file, None, metric=metric, output=f'logs/gpu_{metric}_comparison.png')
-            print(f"Plot saved to logs/gpu_{metric}_comparison.png")
-    except ImportError:
-        print("Could not import plot_metrics, skipping plotting.")
+    # Plot results if not skipped
+    if not args.skip_plots:
+        try:
+            from plot import plot_metrics
+            metrics = ['mean_r', 'kl', 'entropy', 'loss']
+            for metric in metrics:
+                output_file = f'logs/gpu_{metric}_comparison.png'
+                # Call the plot script directly
+                plot_metrics([log_file], metric=metric, output=output_file)
+                print(f"Plot saved to {output_file}")
+        except ImportError:
+            print("Could not import plot_metrics, skipping plotting.")
 
 if __name__ == '__main__':
     main() 
