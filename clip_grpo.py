@@ -360,7 +360,7 @@ def train_clip_with_grpo(args):
     model_suffix = f"_{args.model_name.replace('/', '_')}"
     lora_suffix = f"_lora{args.lora_r}" if args.use_lora else ""
     log_file = f'logs/clip_grpo{model_suffix}{lora_suffix}.csv'
-    logger = CSVLogger(log_file, columns=['step', 'loss', 'mean_r', 'kl', 'entropy_bonus', 'token_adv'])
+    logger = CSVLogger(log_file)
     
     # Training loop
     total_steps = 0
