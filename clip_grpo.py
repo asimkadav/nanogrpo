@@ -16,6 +16,7 @@ import clip
 from torchvision import transforms, datasets
 from grpo import GRPOLoss
 from utils.metrics import CSVLogger
+import math
 
 # Custom GRPO Loss for classification tasks
 class ClassificationGRPOLoss(nn.Module):
@@ -40,22 +41,18 @@ class ClassificationGRPOLoss(nn.Module):
         rewards = rewards.detach()  # Detach rewards
         logp_ref = logp_ref.detach()  # Detach reference log probs
         
-        # Ensure no zeros in rewards with a small epsilon
-        rewards = rewards + self.eps
+        # Compute advantage for more stable learning (baseline subtraction)
+        adv = (rewards - rewards.mean()).detach()
         
-        # Use direct log-prob * reward (REINFORCE-style)
-        policy_term = -torch.mean(logp_pol.squeeze(-1) * rewards)
+        # Use advantage-based policy gradient instead of raw rewards
+        policy_term = -(adv * logp_pol.squeeze(-1)).mean()
         
-        # Safe KL calculation
-        kl_div = (logp_pol.squeeze(-1) - logp_ref.squeeze(-1)).clamp(min=-10, max=10)
+        # Safe KL calculation - no clamping, rely on grad_clip instead
+        kl_div = (logp_pol.squeeze(-1) - logp_ref.squeeze(-1))
         kl_term = self.kl_coef * torch.mean(kl_div)
         
         # Combine terms
         loss = policy_term + kl_term
-        
-        # Calculate a simple advantage for logging
-        rewards_mean = rewards.mean().item()
-        adv = rewards - rewards_mean
         
         # Dummy entropy for compatibility
         ent = torch.zeros(1, device=loss.device)
@@ -214,12 +211,50 @@ def load_data(args):
     
     return train_loader, train_dataset.classes
 
-def get_text_features(model, classes, template="a photo of a {}.", device='cuda'):
-    """Generate text features for all classes."""
+def get_text_features(model, classes, templates=None, device='cuda'):
+    """
+    Generate text features for all classes using one or multiple templates.
+    
+    Args:
+        model: CLIP model
+        classes: List of class names
+        templates: String template or list of templates to use (default: ["a photo of a {}.", "a picture of a {}.", etc.])
+        device: Device to use
+        
+    Returns:
+        Normalized text features
+    """
+    if templates is None:
+        # Default templates from CLIP paper
+        templates = [
+            "a photo of a {}.",
+            "a picture of a {}.",
+            "a rendering of a {}.",
+            "an image of a {}.",
+            "a photograph of a {}.",
+            "a cropped photo of a {}.",
+            "a close-up photo of a {}.",
+            "a bright photo of a {}.",
+            "a dark photo of a {}.",
+            "a painting of a {}."
+        ]
+    elif isinstance(templates, str):
+        templates = [templates]
+    
     with torch.no_grad():
-        text_inputs = torch.cat([clip.tokenize(template.format(c)) for c in classes]).to(device)
-        text_features = model.encode_text(text_inputs)
+        all_text_features = []
+        
+        for template in templates:
+            texts = [template.format(c) for c in classes]
+            text_inputs = torch.cat([clip.tokenize(text) for text in texts]).to(device)
+            text_features = model.encode_text(text_inputs)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
+            all_text_features.append(text_features)
+        
+        # Average features over all templates
+        text_features = torch.stack(all_text_features).mean(dim=0)
         text_features /= text_features.norm(dim=-1, keepdim=True)
+        
     return text_features
 
 def compute_entropy(logits, temperature=1.0):
@@ -283,7 +318,7 @@ def train_clip_with_grpo(args):
     train_loader, classes = load_data(args)
     
     # Generate text features for each class
-    text_features = get_text_features(clip_model, classes, device=args.device)
+    text_features = get_text_features(clip_model, classes, templates=args.templates, device=args.device)
     
     # Optimizer with improved stability
     optimizer = torch.optim.AdamW(
@@ -293,12 +328,23 @@ def train_clip_with_grpo(args):
         eps=1e-6  # Larger epsilon for better numerical stability
     )
     
-    # Add learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, 
-        T_max=args.epochs * len(train_loader),
-        eta_min=args.lr * 0.1  # Minimum learning rate will be 10% of initial
-    )
+    # Add learning rate scheduler with warmup
+    total_steps = args.epochs * len(train_loader)
+    warmup_steps = min(100, int(total_steps * 0.1))  # 10% of total steps or 100, whichever is smaller
+    
+    # Create a warmup scheduler followed by cosine decay
+    from torch.optim.lr_scheduler import LambdaLR
+    
+    def lr_lambda(current_step):
+        # Linear warmup followed by cosine decay
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        else:
+            # Cosine decay to args.lr * 0.1
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
+    
+    scheduler = LambdaLR(optimizer, lr_lambda)
     
     # Create a reference model (frozen)
     ref_model, _ = clip.load(args.model_name, device=device, jit=False)
@@ -314,7 +360,7 @@ def train_clip_with_grpo(args):
     model_suffix = f"_{args.model_name.replace('/', '_')}"
     lora_suffix = f"_lora{args.lora_r}" if args.use_lora else ""
     log_file = f'logs/clip_grpo{model_suffix}{lora_suffix}.csv'
-    logger = CSVLogger(log_file)
+    logger = CSVLogger(log_file, columns=['step', 'loss', 'mean_r', 'kl', 'entropy_bonus', 'token_adv'])
     
     # Training loop
     total_steps = 0
@@ -376,8 +422,15 @@ def train_clip_with_grpo(args):
                 logp_pol = F.log_softmax(all_logits, dim=-1).gather(1, labels.unsqueeze(1))
                 logp_ref = F.log_softmax(ref_logits_full, dim=-1).gather(1, labels.unsqueeze(1))
                 
+                # Calculate true entropy for logging
+                true_entropy = compute_entropy(all_logits, temperature=2.0)  # Higher temperature for more meaningful entropy values
+                
                 # Compute GRPO loss
                 loss, pg_loss, kl, entropy, advantages = grpo_loss(logp_pol, logp_ref, r)
+                
+                # Add entropy bonus to encourage exploration (0.01 is a typical weight)
+                entropy_weight = 0.01
+                loss = loss - entropy_weight * true_entropy
                 
                 # Check for NaN values and handle them
                 if torch.isnan(loss) or torch.isinf(loss):
@@ -389,9 +442,6 @@ def train_clip_with_grpo(args):
                     kl = torch.tensor(0.0, device=device)
                     entropy = torch.tensor(0.0, device=device)
                     advantages = torch.tensor(0.0, device=device)
-                
-                # Calculate true entropy for logging
-                true_entropy = compute_entropy(all_logits, temperature=2.0)  # Higher temperature for more meaningful entropy values
                 
                 # Backward pass
                 loss.backward()
@@ -538,6 +588,9 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', help='Device (cuda or cpu)')
     parser.add_argument('--save-model', action='store_true', help='Save model')
     parser.add_argument('--plot-metrics', action='store_true', help='Plot training metrics')
+    
+    # New template argument
+    parser.add_argument('--templates', type=str, nargs='+', help='Templates to use for text features')
     
     args = parser.parse_args()
     
