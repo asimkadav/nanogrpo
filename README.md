@@ -5,7 +5,7 @@
 
 ## Why GRPO?
 
-GRPO (Swamy et al., 2025) is a lightweight alternative to PPO-RLHF:
+GRPO (DeepSeek-AI et al., 2025) is a lightweight alternative to PPO-RLHF:
 
 |            | PPO-RLHF | **GRPO** |
 |------------|----------|-----------|
@@ -96,9 +96,9 @@ python plot.py --metric entropy logs/grpo.csv logs/ppo.csv
 ---
 
 ## Reading list
+- DeepSeek-AI et al., "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning," [arXiv:2501.12948](https://arxiv.org/abs/2501.12948) (2025)
 - Original blog: "Why GRPO Is Important and How It Works," Oxen.ai, Feb 2025
-- Swamy et al., "All Roads Lead to Likelihood," arXiv 2503.01067 (sec. 3.3)
-- DeepSeek-R1 code drop – regex-only reward, real-world GRPO in the wild.
+- DeepSeek-R1 code drop – real-world GRPO implementation in the wild
 
 ---
 
