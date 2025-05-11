@@ -1,0 +1,13 @@
+{
+  "steps": 100,
+  "lr": 3e-4,
+  "kl_coef": 0.02,
+  "log_interval": 10,
+  "model": {
+    "vocab_size": 65, "block_size": 256,
+    "n_layer": 4, "n_head": 4, "n_embd": 256
+  },
+  "rm":     {"vocab_size":65,"block_size":256,"n_layer":4,"n_head":4,"n_embd":256},
+  "data":   {"block_size":256},
+  "gen":    {"max_new":64}
+} 
