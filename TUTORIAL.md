@@ -14,7 +14,7 @@ Proximal Policy Optimization (PPO) is a popular policy-gradient RL algorithm oft
 
 - **Clipped Surrogate Objective**: To avoid too-large policy updates, PPO doesn't directly maximize `r_i(θ) A_i` (where `r_i = π_θ(a_i|s_i)/π_θ_old(a_i|s_i)` is the probability ratio between new and old policy). Instead, it uses a clipped objective. For each action, it optimizes the minimum of (r_i A_i) and (clip(r_i, 1-ε, 1+ε) · A_i). This means if the policy tries to change probability too much (beyond a small ε, e.g., 0.2), the advantage is capped, removing incentive for further change. This clipping stabilizes training by preventing extreme updates.
 
-- **Entropy Regularization**: PPO often adds an entropy bonus to the objective. Entropy H(p) = -∑_j p_j log p_j measures the policy's randomness. Maximizing entropy (or equivalently adding -α H as a negative bonus to the loss) encourages exploration by penalizing over-confident, low-entropy distributions. In practice, this helps prevent the model from prematurely collapsing to a very narrow set of outputs, which is important when learning from sparse feedback signals.
+- **Entropy Regularization**: PPO often adds an entropy bonus to the objective. Entropy `H(p) = -∑_j p_j` `log p_j` measures the policy's randomness. Maximizing entropy (or equivalently adding -α H as a negative bonus to the loss) encourages exploration by penalizing over-confident, low-entropy distributions. In practice, this helps prevent the model from prematurely collapsing to a very narrow set of outputs, which is important when learning from sparse feedback signals.
 
 - **KL Divergence Penalty / Reference Model**: Especially in RLHF settings, it's useful to keep the fine-tuned policy from straying too far from the original model's behavior. PPO implementations for language models often include a KL-divergence penalty that measures how much the new policy's distribution π_θ deviates from a reference policy (usually the pre-trained model). By adding a term `-β D_KL(π_θ || π_ref)` to the reward or loss, the model is discouraged from "cheating" or extreme deviations, ensuring it remains aligned with its initial state. Intuitively, this prevents the model from exploiting the reward in unnatural ways, akin to an exam scenario where a student might try to game the system – the reference model acts like a regularizer to keep it honest.
 
@@ -30,13 +30,13 @@ However, applying vanilla PPO to CLIP has challenges: CLIP is a large model (ViT
 
 ## From PPO to GRPO: Removing the Value Function with In-Batch Normalization
 
-Gradient-Reweighted (Group Relative) Policy Optimization (GRPO) was proposed to simplify PPO by dropping the value function critic in favor of a simpler baseline derived from a group of samples. The core idea: rather than using a learned value V(s) to estimate baseline reward, GRPO samples multiple outputs for the same input (a group) and uses their average reward as a baseline.
+Gradient-Reweighted (Group Relative) Policy Optimization (GRPO) was proposed to simplify PPO by dropping the value function critic in favor of a simpler baseline derived from a group of samples. The core idea: rather than using a learned value `V(s)` to estimate baseline reward, GRPO samples multiple outputs for the same input (a group) and uses their average reward as a baseline.
 
-In effect, the advantage of each output is measured relative to others in the group, hence Group Relative. Concretely, for each input (say an image or a prompt) q, we generate a set of outputs {o_i}_{i=1}^G from the current policy (or a stale copy of it). We then score each output with a reward function, getting rewards r_1, r_2, ..., r_G. The baseline is simply the mean reward of those outputs, r̄ = (1/G)∑_i r_i. The advantage for each output i is A_i = r_i - r̄.
+In effect, the advantage of each output is measured relative to others in the group, hence Group Relative. Concretely, for each input (say an image or a prompt) q, we generate a set of outputs `{o_i}_{i=1}^G` from the current policy (or a stale copy of it). We then score each output with a reward function, getting rewards `r_1`, `r_2`, ..., `r_G`. The baseline is simply the mean reward of those outputs, `r̄ = (1/G)∑_i r_i`. The advantage for each output i is `A_i` = `r_i - r̄`.
 
 Often, we further normalize by the standard deviation as well, yielding:
 
-A_i = (r_i - mean(r_{1...G}))/(std(r_{1...G}) + ε),
+`A_i = (r_i - mean(r_{1...G}))/(std(r_{1...G}) + ε)`,
 
 which makes the advantage a Z-score within the group. GRPO then plugs these advantages into the usual PPO surrogate loss (with clipping), but without needing any value network.
 
@@ -52,7 +52,7 @@ In GRPO for language tasks, a "group" means multiple responses to the same promp
 
 - **Per-Image Groups**: For each image, sample multiple label predictions from the model's output distribution. For example, have the model produce k candidate labels (by sampling from the softmax over classes k times). Then compute reward for each (1 if correct, 0 if wrong, in a simple case). Now treat those k samples as a group: compute the mean reward and advantages relative to that.
 
-- **Batch-Level Normalization**: Alternatively, if sampling multiple outputs per image is computationally expensive, one can use the entire batch of images as the group for normalization. In this heuristic, for a batch of N images (each with one sampled prediction), we normalize rewards across the batch: A_j = (r_j - r̄_batch)/std(r_batch).
+- **Batch-Level Normalization**: Alternatively, if sampling multiple outputs per image is computationally expensive, one can use the entire batch of images as the group for normalization. In this heuristic, for a batch of N images (each with one sampled prediction), we normalize rewards across the batch: `A_j = (r_j - r̄_batch)/std(r_batch)`.
 
 ## Code Walkthrough: Computing Rewards and Loss in clip_grpo.py
 
