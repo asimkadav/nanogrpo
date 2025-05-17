@@ -13,6 +13,11 @@ class RewardModel(nn.Module):
     def forward(self, x, y):
         # concat prompt + completion; shift right like GPT training
         toks = torch.cat([x, y], dim=1)[:, :-1]  # remove final token for causal
-        emb  = self.transformer(toks)            # [B,T,E]
-        v    = self.value_head(emb).mean(dim=1)  # [B]
-        return v.squeeze(-1) 
+
+        # Run the GPT model to obtain hidden states
+        _ = self.transformer(toks)
+        emb = self.transformer.last_hidden_state  # [B,T,E]
+
+        # Predict scalar reward for the sequence
+        v = self.value_head(emb).mean(dim=1)
+        return v.squeeze(-1)
